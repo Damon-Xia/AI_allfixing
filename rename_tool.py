@@ -185,25 +185,25 @@ def validate_plans(plans: list[RenamePlan]) -> list[str]:
 
         # 0) 文件名不能为空
         if not plan.dst.name or plan.dst.name.startswith('.') and not plan.dst.stem:
-            errors.append(f"文件名为空或无效（来源 {plan.src.name}）")
+            errors.append(f"文件名为空或无效（来源：{plan.src.name}）")
             continue
 
         # 1) 目标路径不能与已有的别的文件冲突
         if plan.dst.exists() and plan.dst != plan.src:
-            errors.append(f"目标已存在：{plan.dst.name}（来源 {plan.src.name}）")
+            errors.append(f"目标文件已存在：{plan.dst.name}（来源：{plan.src.name}）")
 
         # 2) 多个源不能改成同一个目标
         if plan.dst in seen_targets:
             errors.append(
-                f"目标重名：{plan.dst.name} 同时来自 "
-                f"{seen_targets[plan.dst].name} 和 {plan.src.name}"
+                f"目标名重复：{plan.dst.name}（来自 "
+                f"{seen_targets[plan.dst].name} 和 {plan.src.name}）"
             )
         else:
             seen_targets[plan.dst] = plan.src
 
         # 3) 文件名不能包含路径分隔符或非法字符
         if any(c in plan.dst.name for c in ('/', '\\', ':', '*', '?', '"', '<', '>', '|')):
-            errors.append(f"非法文件名：{plan.dst.name}")
+            errors.append(f"文件名含有非法字符：{plan.dst.name}")
 
     return errors
 
@@ -243,32 +243,34 @@ def execute_plans(
 # ---------------------------- 命令行入口（可选） ---------------------------- #
 
 def run_cli() -> int:
-    """简单的命令行模式，方便没有 GUI 环境时也能用。
+    """命令行模式，方便没有图形界面的环境使用。
 
     用法示例：
-      python rename_tool.py --cli prefix  ./folder  IMG_
-      python rename_tool.py --cli suffix  ./folder  _final
-      python rename_tool.py --cli seq     ./folder  photo  --start 1 --pad 2 --sep _
+      python rename_tool.py --cli prefix  ./文件夹  IMG_
+      python rename_tool.py --cli suffix  ./文件夹  _终版
+      python rename_tool.py --cli seq     ./文件夹  照片  --start 1 --pad 2 --sep _
+      python rename_tool.py --cli replace ./文件夹  旧名  --replace-with 新名 --rename-folder
     可选参数：
       --ext jpg,png         仅处理这些扩展名
       --recursive           递归处理子文件夹
-      --apply               不加则只预览，加上才会真的重命名
+      -y                    跳过确认直接执行（不等待回车）
     """
     import argparse
 
-    parser = argparse.ArgumentParser(description="批量重命名工具 (CLI 模式)")
-    parser.add_argument("--cli", required=True, choices=["prefix", "suffix", "seq", "replace"])
-    parser.add_argument("folder", type=Path)
-    parser.add_argument("text", help="prefix/suffix/seq 的字符串，或 replace 模式的查找字符串")
-    parser.add_argument("--start", type=int, default=1)
-    parser.add_argument("--pad", type=int, default=2)
-    parser.add_argument("--sep", default="_", help="seq 模式下基础名和序号之间的分隔符")
-    parser.add_argument("--replace-with", default="", help="replace 模式下的替换字符串")
-    parser.add_argument("--ignore-case", action="store_true", help="replace 模式不区分大小写")
-    parser.add_argument("--rename-folder", action="store_true", help="replace 模式同时改文件夹名")
-    parser.add_argument("--ext", default="", help="逗号分隔的扩展名过滤，如 jpg,png")
-    parser.add_argument("--recursive", action="store_true")
-    parser.add_argument("--apply", action="store_true", help="真正执行；不加则只预览")
+    parser = argparse.ArgumentParser(description="批量重命名工具（命令行模式）")
+    parser.add_argument("--cli", required=True, choices=["prefix", "suffix", "seq", "replace"],
+                        help="模式：加前缀 / 加后缀 / 统一序号 / 查找替换")
+    parser.add_argument("folder", type=Path, help="目标文件夹路径")
+    parser.add_argument("text", help="前缀/后缀/基础名/查找字符串")
+    parser.add_argument("--start", type=int, default=1, help="起始序号（默认 1）")
+    parser.add_argument("--pad", type=int, default=2, help="序号位数（默认 2）")
+    parser.add_argument("--sep", default="_", help="基础名和序号之间的分隔符（默认 _）")
+    parser.add_argument("--replace-with", default="", help="替换为的字符串")
+    parser.add_argument("--ignore-case", action="store_true", help="不区分大小写")
+    parser.add_argument("--rename-folder", action="store_true", help="同时修改文件夹名")
+    parser.add_argument("--ext", default="", help="扩展名过滤，逗号分隔，如 jpg,png")
+    parser.add_argument("--recursive", action="store_true", help="递归处理子文件夹")
+    parser.add_argument("-y", "--yes", action="store_true", help="跳过确认直接执行")
     args = parser.parse_args()
 
     exts = [e for e in args.ext.split(",") if e.strip()] or None
@@ -292,24 +294,33 @@ def run_cli() -> int:
         )
 
     errors = validate_plans(plans)
-    print(f"共 {len(plans)} 个文件，将重命名 {sum(1 for p in plans if p.changed)} 个：")
+    change_count = sum(1 for p in plans if p.changed)
+    print(f"\n共 {len(plans)} 个文件，将重命名 {change_count} 个：\n")
     for p in plans:
-        flag = " " if not p.changed else "*"
-        print(f"  {flag} {p.src.name}  ->  {p.dst.name}")
+        flag = "  " if not p.changed else "* "
+        print(f"  {flag}{p.src.name}  →  {p.dst.name}")
     if errors:
-        print("\n发现以下问题，未执行：")
+        print("\n【发现以下问题，无法执行】")
         for e in errors:
-            print(f"  - {e}")
+            print(f"  ✗ {e}")
         return 2
 
-    if not args.apply:
-        print("\n预览结束。加上 --apply 才会真正重命名。")
+    if change_count == 0:
+        print("\n没有需要改名的文件。")
         return 0
 
-    done = execute_plans(plans)
-    print(f"\n完成，成功重命名 {len(done)} 个文件。")
+    # 确认执行：按回车键执行，Ctrl+C 取消
+    if not args.yes:
+        try:
+            input("\n按【回车键】执行重命名，按 Ctrl+C 取消 ... ")
+        except (KeyboardInterrupt, EOFError):
+            print("\n已取消。")
+            return 0
 
-    # replace 模式可选：同时改文件夹名
+    done = execute_plans(plans)
+    print(f"\n✓ 完成！成功重命名 {len(done)} 个文件。")
+
+    # 查找替换模式可选：同时改文件夹名
     if args.cli == "replace" and args.rename_folder:
         try:
             new_folder = replace_folder_name(
@@ -317,11 +328,11 @@ def run_cli() -> int:
                 case_sensitive=not args.ignore_case,
             )
             if new_folder:
-                print(f"文件夹已重命名：{args.folder.name}  ->  {new_folder.name}")
+                print(f"✓ 文件夹已重命名：{args.folder.name}  →  {new_folder.name}")
             else:
-                print("文件夹名无需变更。")
+                print("  文件夹名无需变更。")
         except OSError as e:
-            print(f"文件夹重命名失败：{e}")
+            print(f"✗ 文件夹重命名失败：{e}")
             return 3
 
     return 0

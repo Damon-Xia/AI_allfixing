@@ -35,29 +35,29 @@ python rename_tool.py
 不想开 GUI 也行：
 
 ```bash
-# 加前缀 —— 预览
-python rename_tool.py --cli prefix ./folder IMG_
-
-# 加前缀 —— 真正执行
-python rename_tool.py --cli prefix ./folder IMG_ --apply
+# 加前缀 —— 预览后按回车执行
+python rename_tool.py --cli prefix ./文件夹 IMG_
 
 # 加后缀（只对 jpg、png 生效）
-python rename_tool.py --cli suffix ./folder _final --ext jpg,png --apply
+python rename_tool.py --cli suffix ./文件夹 _终版 --ext jpg,png
 
-# 统一名 + 序号：photo_01.jpg, photo_02.jpg ...
-python rename_tool.py --cli seq ./folder photo --start 1 --pad 2 --sep _ --apply
+# 统一名 + 序号：旅行_01.jpg, 旅行_02.jpg ...
+python rename_tool.py --cli seq ./文件夹 旅行 --start 1 --pad 2 --sep _
 
-# 查找替换：把文件名中的 "old" 替换成 "new"
-python rename_tool.py --cli replace ./folder old --replace-with new --apply
+# 查找替换：把文件名中的 "旧" 替换成 "新"
+python rename_tool.py --cli replace ./文件夹 旧 --replace-with 新
 
 # 查找替换 + 同时改文件夹名
-python rename_tool.py --cli replace ./folder old --replace-with new --rename-folder --apply
+python rename_tool.py --cli replace ./文件夹 旧项目 --replace-with 新项目 --rename-folder
 
 # 查找替换 + 不区分大小写
-python rename_tool.py --cli replace ./folder OldName --replace-with NewName --ignore-case --apply
+python rename_tool.py --cli replace ./文件夹 OldName --replace-with NewName --ignore-case
 
 # 递归处理子文件夹
-python rename_tool.py --cli prefix ./folder IMG_ --recursive --apply
+python rename_tool.py --cli prefix ./文件夹 IMG_ --recursive
+
+# 跳过确认直接执行（不等回车）
+python rename_tool.py --cli prefix ./文件夹 IMG_ -y
 ```
 
 ## CLI 参数说明
@@ -67,7 +67,7 @@ python rename_tool.py --cli prefix ./folder IMG_ --recursive --apply
 | `--cli`           | 全部       | 选择模式：`prefix` / `suffix` / `seq` / `replace` |
 | `folder`          | 全部       | 目标文件夹路径                             |
 | `text`            | 全部       | 前缀/后缀/基础名/查找字符串               |
-| `--apply`         | 全部       | 不加只预览，加上才真正执行                 |
+| `-y` / `--yes`    | 全部       | 跳过确认直接执行（不等回车）               |
 | `--ext`           | 全部       | 逗号分隔的扩展名过滤                       |
 | `--recursive`     | 全部       | 递归处理子文件夹                           |
 | `--start`         | seq        | 起始序号（默认 1）                         |
