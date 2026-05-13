@@ -1,0 +1,16 @@
+# AI AllFixing - Local Model Configuration (Ollama)
+# Copy this to ~/.ai-allfixing/config.yaml
+
+provider:
+  name: openai  # Ollama exposes OpenAI-compatible API
+  api_key: ollama  # Any non-empty string
+  model: llama3
+  base_url: http://localhost:11434/v1
+  max_tokens: 4096
+  temperature: 0.1
+  extra: {}
+
+log_level: INFO
+cache_enabled: true
+cache_dir: ~/.ai-allfixing/cache
+output_format: text
