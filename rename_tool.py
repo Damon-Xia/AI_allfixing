@@ -5,6 +5,7 @@
   1. 加前缀：在文件名前面加上指定字符串
   2. 加后缀：在文件名后面（扩展名前）加上指定字符串
   3. 统一命名 + 序号：例如 photo_01.jpg、photo_02.jpg ...
+  4. 查找替换：将文件名和文件夹名中的指定字段替换为另一个
 
 特性：
   - 支持预览，先看效果再执行
@@ -13,6 +14,7 @@
   - 序号位数可调（01 / 001 / 0001 ...）
   - 序号起始值可调
   - 一键撤销上一次操作
+  - 查找替换可同时修改文件夹名，支持大小写不敏感
 
 依赖：仅需 Python 3.8+ 标准库（tkinter），无需 pip 安装任何包。
 运行：python rename_tool.py
@@ -114,6 +116,64 @@ def build_sequence_plans(
     return plans
 
 
+def build_replace_plans(
+    files: list[Path],
+    search: str,
+    replace: str,
+    case_sensitive: bool = True,
+) -> list[RenamePlan]:
+    """查找替换：将文件名中所有匹配 search 的子串替换为 replace。
+
+    Args:
+        files: 待处理的文件列表
+        search: 要查找的字符串
+        replace: 替换成的字符串
+        case_sensitive: 是否区分大小写（默认区分）
+    """
+    import re as _re
+
+    plans: list[RenamePlan] = []
+    for f in files:
+        name = f.name
+        if case_sensitive:
+            new_name = name.replace(search, replace)
+        else:
+            # 不区分大小写时用正则，用 lambda 避免 replace 中的反斜杠被当作正则转义
+            new_name = _re.sub(_re.escape(search), lambda m: replace, name, flags=_re.IGNORECASE)
+        plans.append(RenamePlan(f, f.with_name(new_name) if new_name else f))
+    return plans
+
+
+def replace_folder_name(
+    folder: Path,
+    search: str,
+    replace: str,
+    case_sensitive: bool = True,
+) -> Path | None:
+    """将目标文件夹本身的名字中的 search 替换为 replace。
+
+    返回新的文件夹路径（如果有改动），None 表示不需要改或出错。
+    注意：此操作会实际执行重命名（不是预览），调用前应先确认。
+    """
+    import re as _re
+
+    old_name = folder.name
+    if case_sensitive:
+        new_name = old_name.replace(search, replace)
+    else:
+        new_name = _re.sub(_re.escape(search), lambda m: replace, old_name, flags=_re.IGNORECASE)
+
+    if new_name == old_name:
+        return None  # 无变化
+
+    new_folder = folder.with_name(new_name)
+    if new_folder.exists():
+        raise OSError(f"目标文件夹已存在：{new_folder}")
+
+    folder.rename(new_folder)
+    return new_folder
+
+
 def validate_plans(plans: list[RenamePlan]) -> list[str]:
     """返回错误列表（空列表表示全部通过）。"""
     errors: list[str] = []
@@ -121,6 +181,11 @@ def validate_plans(plans: list[RenamePlan]) -> list[str]:
 
     for plan in plans:
         if not plan.changed:
+            continue
+
+        # 0) 文件名不能为空
+        if not plan.dst.name or plan.dst.name.startswith('.') and not plan.dst.stem:
+            errors.append(f"文件名为空或无效（来源 {plan.src.name}）")
             continue
 
         # 1) 目标路径不能与已有的别的文件冲突
@@ -192,12 +257,15 @@ def run_cli() -> int:
     import argparse
 
     parser = argparse.ArgumentParser(description="批量重命名工具 (CLI 模式)")
-    parser.add_argument("--cli", required=True, choices=["prefix", "suffix", "seq"])
+    parser.add_argument("--cli", required=True, choices=["prefix", "suffix", "seq", "replace"])
     parser.add_argument("folder", type=Path)
-    parser.add_argument("text", help="prefix/suffix 的字符串，或 seq 的基础名")
+    parser.add_argument("text", help="prefix/suffix/seq 的字符串，或 replace 模式的查找字符串")
     parser.add_argument("--start", type=int, default=1)
     parser.add_argument("--pad", type=int, default=2)
     parser.add_argument("--sep", default="_", help="seq 模式下基础名和序号之间的分隔符")
+    parser.add_argument("--replace-with", default="", help="replace 模式下的替换字符串")
+    parser.add_argument("--ignore-case", action="store_true", help="replace 模式不区分大小写")
+    parser.add_argument("--rename-folder", action="store_true", help="replace 模式同时改文件夹名")
     parser.add_argument("--ext", default="", help="逗号分隔的扩展名过滤，如 jpg,png")
     parser.add_argument("--recursive", action="store_true")
     parser.add_argument("--apply", action="store_true", help="真正执行；不加则只预览")
@@ -213,6 +281,11 @@ def run_cli() -> int:
         plans = build_prefix_plans(files, args.text)
     elif args.cli == "suffix":
         plans = build_suffix_plans(files, args.text)
+    elif args.cli == "replace":
+        plans = build_replace_plans(
+            files, args.text, args.replace_with,
+            case_sensitive=not args.ignore_case,
+        )
     else:
         plans = build_sequence_plans(
             files, args.text, start=args.start, pad=args.pad, separator=args.sep
@@ -235,6 +308,22 @@ def run_cli() -> int:
 
     done = execute_plans(plans)
     print(f"\n完成，成功重命名 {len(done)} 个文件。")
+
+    # replace 模式可选：同时改文件夹名
+    if args.cli == "replace" and args.rename_folder:
+        try:
+            new_folder = replace_folder_name(
+                args.folder, args.text, args.replace_with,
+                case_sensitive=not args.ignore_case,
+            )
+            if new_folder:
+                print(f"文件夹已重命名：{args.folder.name}  ->  {new_folder.name}")
+            else:
+                print("文件夹名无需变更。")
+        except OSError as e:
+            print(f"文件夹重命名失败：{e}")
+            return 3
+
     return 0
 
 
@@ -336,6 +425,31 @@ def run_gui() -> int:
                 tab_seq, text="例：photo + _ + 01 = photo_01.jpg, photo_02.jpg ...", foreground="gray"
             ).grid(row=2, column=0, columnspan=4, sticky="w", **pad)
 
+            # --- 查找替换 ---
+            tab_replace = ttk.Frame(nb)
+            nb.add(tab_replace, text="查找替换")
+            ttk.Label(tab_replace, text="查找：").grid(row=0, column=0, sticky="w", **pad)
+            self.var_search = tk.StringVar()
+            ttk.Entry(tab_replace, textvariable=self.var_search, width=25).grid(row=0, column=1, sticky="w", **pad)
+
+            ttk.Label(tab_replace, text="替换为：").grid(row=0, column=2, sticky="w", **pad)
+            self.var_replace = tk.StringVar()
+            ttk.Entry(tab_replace, textvariable=self.var_replace, width=25).grid(row=0, column=3, sticky="w", **pad)
+
+            self.var_ignore_case = tk.BooleanVar(value=False)
+            ttk.Checkbutton(tab_replace, text="不区分大小写", variable=self.var_ignore_case).grid(
+                row=1, column=0, columnspan=2, sticky="w", **pad
+            )
+            self.var_rename_folder = tk.BooleanVar(value=True)
+            ttk.Checkbutton(tab_replace, text="同时修改文件夹名", variable=self.var_rename_folder).grid(
+                row=1, column=2, columnspan=2, sticky="w", **pad
+            )
+            ttk.Label(
+                tab_replace,
+                text="例：查找 'old' 替换 'new'：old_photo.jpg -> new_photo.jpg，文件夹 old_project -> new_project",
+                foreground="gray",
+            ).grid(row=2, column=0, columnspan=4, sticky="w", **pad)
+
             # 操作按钮
             btns = ttk.Frame(root)
             btns.pack(fill="x", **pad)
@@ -373,7 +487,7 @@ def run_gui() -> int:
 
         def _current_mode(self) -> str:
             idx = self.nb.index(self.nb.select())
-            return ["prefix", "suffix", "seq"][idx]
+            return ["prefix", "suffix", "seq", "replace"][idx]
 
         def _build_plans(self) -> list[RenamePlan]:
             folder_str = self.var_folder.get().strip()
@@ -404,17 +518,32 @@ def run_gui() -> int:
                     messagebox.showwarning("提示", "请输入后缀。")
                     return []
                 return build_suffix_plans(files, text)
-            # seq
-            base = self.var_base.get()
-            if not base:
-                messagebox.showwarning("提示", "请输入基础名。")
+            if mode == "seq":
+                base = self.var_base.get()
+                if not base:
+                    messagebox.showwarning("提示", "请输入基础名。")
+                    return []
+                try:
+                    start_val = int(self.var_start.get())
+                    pad_val = int(self.var_pad.get())
+                except (ValueError, tk.TclError):
+                    messagebox.showwarning("提示", "起始序号和位数必须是整数。")
+                    return []
+                return build_sequence_plans(
+                    files,
+                    base_name=base,
+                    start=start_val,
+                    pad=pad_val,
+                    separator=self.var_sep.get(),
+                )
+            # replace
+            search = self.var_search.get()
+            if not search:
+                messagebox.showwarning("提示", "请输入要查找的字符串。")
                 return []
-            return build_sequence_plans(
-                files,
-                base_name=base,
-                start=int(self.var_start.get()),
-                pad=int(self.var_pad.get()),
-                separator=self.var_sep.get(),
+            return build_replace_plans(
+                files, search, self.var_replace.get(),
+                case_sensitive=not self.var_ignore_case.get(),
             )
 
         def _refresh_table(self, plans: list[RenamePlan], errors: list[str]) -> None:
@@ -484,6 +613,25 @@ def run_gui() -> int:
                 self.tree.delete(item)
             for i, p in enumerate(done, start=1):
                 self.tree.insert("", "end", values=(i, p.src.name, p.dst.name, "已完成"))
+
+            # replace 模式：同时改文件夹名
+            if self._current_mode() == "replace" and self.var_rename_folder.get():
+                folder = Path(self.var_folder.get().strip())
+                search = self.var_search.get()
+                replace_str = self.var_replace.get()
+                try:
+                    new_folder = replace_folder_name(
+                        folder, search, replace_str,
+                        case_sensitive=not self.var_ignore_case.get(),
+                    )
+                    if new_folder:
+                        self.var_folder.set(str(new_folder))
+                        messagebox.showinfo(
+                            "文件夹已改名",
+                            f"{folder.name}  ->  {new_folder.name}",
+                        )
+                except OSError as e:
+                    messagebox.showwarning("文件夹改名失败", str(e))
 
         def _undo(self) -> None:
             if not self._last_done:
