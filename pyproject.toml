@@ -1,0 +1,85 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "ai-allfixing"
+version = "0.1.0"
+description = "A powerful collection of AI-powered tools to fix, enhance, and automate everything."
+readme = "README.md"
+license = {file = "LICENSE"}
+requires-python = ">=3.9"
+authors = [
+    {name = "Damon Xia", email = "damon@example.com"},
+]
+keywords = ["ai", "tools", "automation", "code-fix", "llm", "openai", "claude"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+dependencies = [
+    "openai>=1.0.0",
+    "anthropic>=0.18.0",
+    "click>=8.0.0",
+    "rich>=13.0.0",
+    "pyyaml>=6.0",
+    "pydantic>=2.0.0",
+    "httpx>=0.24.0",
+    "tiktoken>=0.5.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "pytest-cov>=4.0",
+    "pytest-asyncio>=0.21",
+    "ruff>=0.1.0",
+    "mypy>=1.0",
+    "pre-commit>=3.0",
+]
+docs = [
+    "mkdocs>=1.5",
+    "mkdocs-material>=9.0",
+    "mkdocstrings[python]>=0.20",
+]
+all = [
+    "ai-allfixing[dev,docs]",
+]
+
+[project.urls]
+Homepage = "https://github.com/Damon-Xia/AI_allfixing"
+Documentation = "https://github.com/Damon-Xia/AI_allfixing/tree/main/docs"
+Repository = "https://github.com/Damon-Xia/AI_allfixing"
+Issues = "https://github.com/Damon-Xia/AI_allfixing/issues"
+
+[project.scripts]
+ai-fix = "ai_allfixing.cli.main:cli"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/ai_allfixing"]
+
+[tool.ruff]
+target-version = "py39"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "N", "UP", "B", "A", "COM", "C4", "ISC", "ICN", "PIE", "PT", "RSE", "RET", "SIM", "TID", "ARG", "ERA", "PL", "RUF"]
+ignore = ["COM812", "ISC001"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+
+[tool.mypy]
+python_version = "3.9"
+strict = true
+warn_return_any = true
+warn_unused_configs = true

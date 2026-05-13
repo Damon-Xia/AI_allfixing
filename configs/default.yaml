@@ -1,0 +1,16 @@
+# AI AllFixing - Default Configuration
+# Copy this to ~/.ai-allfixing/config.yaml and customize
+
+provider:
+  name: openai
+  api_key: ""  # Set via OPENAI_API_KEY env var or here
+  model: gpt-4o
+  base_url: null
+  max_tokens: 4096
+  temperature: 0.1
+  extra: {}
+
+log_level: INFO
+cache_enabled: true
+cache_dir: ~/.ai-allfixing/cache
+output_format: text
