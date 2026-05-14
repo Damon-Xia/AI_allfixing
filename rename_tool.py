@@ -393,19 +393,23 @@ def run_cli() -> int:
             print("\n已取消。")
             return 0
 
-    # 1) 先做重命名
-    if change_count > 0:
-        done = execute_plans(plans)
-        print(f"\n✓ 完成！成功重命名 {len(done)} 个文件。")
-
-    # 2) 删除指定扩展名文件
+    # 1) 先删除指定扩展名文件（在重命名之前，避免路径变化导致找不到）
     if files_to_delete:
         deleted, failed = delete_files(files_to_delete)
-        print(f"✓ 成功删除 {len(deleted)} 个文件。")
+        print(f"\n✓ 成功删除 {len(deleted)} 个文件。")
         if failed:
             print(f"✗ {len(failed)} 个文件删除失败：")
             for f, msg in failed:
                 print(f"    - {f.name}：{msg}")
+        # 从重命名计划中移除已被删除的文件
+        deleted_set = set(deleted)
+        plans = [p for p in plans if p.src not in deleted_set]
+        change_count = sum(1 for p in plans if p.changed)
+
+    # 2) 再做重命名
+    if change_count > 0:
+        done = execute_plans(plans)
+        print(f"✓ 完成！成功重命名 {len(done)} 个文件。")
 
     # 查找替换模式可选：同时改文件夹名
     if args.cli == "replace" and args.rename_folder:
