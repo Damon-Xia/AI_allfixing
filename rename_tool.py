@@ -174,6 +174,63 @@ def replace_folder_name(
     return new_folder
 
 
+def collect_files_by_ext(
+    folder: Path,
+    extensions: Iterable[str],
+    recursive: bool = False,
+) -> list[Path]:
+    """按扩展名收集文件（用于删除场景）。
+
+    Args:
+        folder: 目标文件夹
+        extensions: 要匹配的扩展名（带或不带 '.' 都可以），如 ['.meta', 'tmp']
+        recursive: 是否递归处理子文件夹
+
+    Returns:
+        匹配到的文件列表（按路径排序），空列表表示没有匹配项。
+    """
+    if not folder.is_dir():
+        return []
+
+    # 规范化扩展名
+    norm_exts: set[str] = set()
+    for ext in extensions:
+        ext = ext.strip().lower()
+        if not ext:
+            continue
+        if not ext.startswith("."):
+            ext = "." + ext
+        norm_exts.add(ext)
+    if not norm_exts:
+        return []
+
+    iterator = folder.rglob("*") if recursive else folder.iterdir()
+    files: list[Path] = []
+    for p in iterator:
+        if p.is_file() and p.suffix.lower() in norm_exts:
+            files.append(p)
+    files.sort(key=lambda x: (str(x.parent).lower(), x.name.lower()))
+    return files
+
+
+def delete_files(files: list[Path]) -> tuple[list[Path], list[tuple[Path, str]]]:
+    """实际删除一组文件。
+
+    Returns:
+        (成功删除的文件列表, [(失败的文件, 错误信息), ...])
+    注意：此操作不可撤销，调用前必须先让用户确认。
+    """
+    success: list[Path] = []
+    failed: list[tuple[Path, str]] = []
+    for f in files:
+        try:
+            f.unlink()
+            success.append(f)
+        except OSError as e:
+            failed.append((f, str(e)))
+    return success, failed
+
+
 def validate_plans(plans: list[RenamePlan]) -> list[str]:
     """返回错误列表（空列表表示全部通过）。"""
     errors: list[str] = []
@@ -268,6 +325,8 @@ def run_cli() -> int:
     parser.add_argument("--replace-with", default="", help="替换为的字符串")
     parser.add_argument("--ignore-case", action="store_true", help="不区分大小写")
     parser.add_argument("--rename-folder", action="store_true", help="同时修改文件夹名")
+    parser.add_argument("--delete-ext", default="",
+                        help="（仅 replace 模式）同时删除这些扩展名的文件，逗号分隔，如 meta,tmp")
     parser.add_argument("--ext", default="", help="扩展名过滤，逗号分隔，如 jpg,png")
     parser.add_argument("--recursive", action="store_true", help="递归处理子文件夹")
     parser.add_argument("-y", "--yes", action="store_true", help="跳过确认直接执行")
@@ -275,7 +334,14 @@ def run_cli() -> int:
 
     exts = [e for e in args.ext.split(",") if e.strip()] or None
     files = collect_files(args.folder, recursive=args.recursive, extensions=exts)
-    if not files:
+
+    # replace 模式可以单独触发删除：即使没有可改名的文件，只要要删的文件存在也应继续
+    delete_exts = [e for e in args.delete_ext.split(",") if e.strip()] if args.cli == "replace" else []
+    files_to_delete: list[Path] = []
+    if delete_exts:
+        files_to_delete = collect_files_by_ext(args.folder, delete_exts, recursive=args.recursive)
+
+    if not files and not files_to_delete:
         print("未找到匹配的文件。")
         return 1
 
@@ -299,26 +365,47 @@ def run_cli() -> int:
     for p in plans:
         flag = "  " if not p.changed else "* "
         print(f"  {flag}{p.src.name}  →  {p.dst.name}")
+
+    # 显示待删除的文件
+    if files_to_delete:
+        print(f"\n另外，将删除 {len(files_to_delete)} 个 {','.join(delete_exts)} 类型的文件：\n")
+        for f in files_to_delete:
+            print(f"  ✗ {f.name}")
+
     if errors:
         print("\n【发现以下问题，无法执行】")
         for e in errors:
             print(f"  ✗ {e}")
         return 2
 
-    if change_count == 0:
-        print("\n没有需要改名的文件。")
+    if change_count == 0 and not files_to_delete:
+        print("\n没有需要改名或删除的文件。")
         return 0
 
     # 确认执行：按回车键执行，Ctrl+C 取消
     if not args.yes:
         try:
-            input("\n按【回车键】执行重命名，按 Ctrl+C 取消 ... ")
+            if files_to_delete:
+                input("\n按【回车键】执行重命名 + 删除，按 Ctrl+C 取消 ... ")
+            else:
+                input("\n按【回车键】执行重命名，按 Ctrl+C 取消 ... ")
         except (KeyboardInterrupt, EOFError):
             print("\n已取消。")
             return 0
 
-    done = execute_plans(plans)
-    print(f"\n✓ 完成！成功重命名 {len(done)} 个文件。")
+    # 1) 先做重命名
+    if change_count > 0:
+        done = execute_plans(plans)
+        print(f"\n✓ 完成！成功重命名 {len(done)} 个文件。")
+
+    # 2) 删除指定扩展名文件
+    if files_to_delete:
+        deleted, failed = delete_files(files_to_delete)
+        print(f"✓ 成功删除 {len(deleted)} 个文件。")
+        if failed:
+            print(f"✗ {len(failed)} 个文件删除失败：")
+            for f, msg in failed:
+                print(f"    - {f.name}：{msg}")
 
     # 查找替换模式可选：同时改文件夹名
     if args.cli == "replace" and args.rename_folder:
@@ -455,11 +542,21 @@ def run_gui() -> int:
             ttk.Checkbutton(tab_replace, text="同时修改文件夹名", variable=self.var_rename_folder).grid(
                 row=1, column=2, columnspan=2, sticky="w", **pad
             )
+
+            # 同时删除指定扩展名的文件
+            ttk.Label(tab_replace, text="同时删除这些扩展名的文件（逗号分隔，如 meta,tmp）：").grid(
+                row=2, column=0, columnspan=2, sticky="w", **pad
+            )
+            self.var_delete_ext = tk.StringVar()
+            ttk.Entry(tab_replace, textvariable=self.var_delete_ext, width=25).grid(
+                row=2, column=2, columnspan=2, sticky="w", **pad
+            )
+
             ttk.Label(
                 tab_replace,
-                text="例：查找 'old' 替换 'new'：old_photo.jpg -> new_photo.jpg，文件夹 old_project -> new_project",
+                text="例：查找 'old' 替换 'new'：old_photo.jpg → new_photo.jpg；并可勾选同时删除 .meta 文件",
                 foreground="gray",
-            ).grid(row=2, column=0, columnspan=4, sticky="w", **pad)
+            ).grid(row=3, column=0, columnspan=4, sticky="w", **pad)
 
             # 操作按钮
             btns = ttk.Frame(root)
