@@ -359,10 +359,15 @@ def run_cli() -> int:
             files, args.text, start=args.start, pad=args.pad, separator=args.sep
         )
 
-    errors = validate_plans(plans)
-    change_count = sum(1 for p in plans if p.changed)
+    # 预先排除将被删除的文件，避免验证时产生误报
+    delete_set = set(files_to_delete)
+    plans_for_validation = [p for p in plans if p.src not in delete_set]
+    errors = validate_plans(plans_for_validation)
+    change_count = sum(1 for p in plans if p.changed and p.src not in delete_set)
     print(f"\n共 {len(plans)} 个文件，将重命名 {change_count} 个：\n")
     for p in plans:
+        if p.src in delete_set:
+            continue  # 即将被删除，不显示
         flag = "  " if not p.changed else "* "
         print(f"  {flag}{p.src.name}  →  {p.dst.name}")
 
@@ -701,23 +706,65 @@ def run_gui() -> int:
                 return
 
             change_count = sum(1 for p in self._plans if p.changed)
-            if change_count == 0:
-                messagebox.showinfo("提示", "没有任何需要改名的文件。")
+
+            # replace 模式：收集待删除文件
+            files_to_delete: list[Path] = []
+            if self._current_mode() == "replace":
+                del_exts = [e for e in self.var_delete_ext.get().split(",") if e.strip()]
+                if del_exts:
+                    folder = Path(self.var_folder.get().strip())
+                    files_to_delete = collect_files_by_ext(
+                        folder, del_exts, recursive=self.var_recursive.get()
+                    )
+
+            if change_count == 0 and not files_to_delete:
+                messagebox.showinfo("提示", "没有任何需要改名或删除的文件。")
                 return
 
-            if not messagebox.askyesno("确认", f"确定要重命名 {change_count} 个文件吗？"):
+            # 构建确认信息
+            msg = f"确定要重命名 {change_count} 个文件"
+            if files_to_delete:
+                msg += f"，并删除 {len(files_to_delete)} 个文件（不可撤销）"
+            msg += " 吗？"
+            if not messagebox.askyesno("确认", msg):
                 return
 
-            try:
-                done = execute_plans(self._plans)
-            except OSError as e:
-                messagebox.showerror("失败", f"重命名时出错：{e}")
-                return
+            # 1) 先删除
+            if files_to_delete:
+                deleted, failed = delete_files(files_to_delete)
+                if deleted:
+                    # 从重命名计划中移除已删除的文件
+                    deleted_set = set(deleted)
+                    self._plans = [p for p in self._plans if p.src not in deleted_set]
+                if failed:
+                    messagebox.showwarning(
+                        "部分删除失败",
+                        f"成功删除 {len(deleted)} 个，失败 {len(failed)} 个：\n"
+                        + "\n".join(f.name for f, _ in failed[:10]),
+                    )
+
+            # 2) 再重命名
+            remaining = [p for p in self._plans if p.changed]
+            if remaining:
+                try:
+                    done = execute_plans(self._plans)
+                except OSError as e:
+                    messagebox.showerror("失败", f"重命名时出错：{e}")
+                    return
+            else:
+                done = []
 
             self._last_done = done
             self._plans = []
+
+            # 状态汇总
+            status_parts = []
+            if done:
+                status_parts.append(f"重命名 {len(done)} 个")
+            if files_to_delete:
+                status_parts.append(f"删除 {len(files_to_delete)} 个")
             self.lbl_status.config(
-                text=f"已完成，重命名 {len(done)} 个文件。可点'撤销上一次'还原。",
+                text=f"已完成：{'，'.join(status_parts)}。可点'撤销上一次'还原重命名。",
                 foreground="green",
             )
 
