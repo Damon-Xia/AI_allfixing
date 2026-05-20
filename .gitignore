@@ -1,1 +1,5 @@
 __pycache__/
+# 打包产物和临时文件
+dist/
+build/
+*.spec
